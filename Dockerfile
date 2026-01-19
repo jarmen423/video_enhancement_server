@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 RUN pip install runpod requests boto3
 
 # 3. Clone Official VEnhancer Repo
-RUN git clone [https://github.com/Vchitect/VEnhancer.git](https://github.com/Vchitect/VEnhancer.git)
+RUN git clone https://github.com/Vchitect/VEnhancer.git
 
 # 4. Install VEnhancer Dependencies
 WORKDIR /app/VEnhancer
@@ -24,7 +24,7 @@ RUN pip install imageio imageio-ffmpeg einops fvcore tensorboard scipy
 # We download the model now so we don't download it on every API call.
 # Model: VEnhancer_v2.pt (~5GB)
 RUN mkdir -p ckpts
-RUN wget -O ckpts/venhancer_v2.pt "[https://huggingface.co/Vchitect/VEnhancer/resolve/main/venhancer_v2.pt](https://huggingface.co/Vchitect/VEnhancer/resolve/main/venhancer_v2.pt)"
+RUN wget -O ckpts/venhancer_v2.pt https://huggingface.co/Vchitect/VEnhancer/resolve/main/venhancer_v2.pt
 
 # 6. Setup Handler
 WORKDIR /app
