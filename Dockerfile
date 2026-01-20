@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 2. Install Python Utilities
 # optimized python install , 
 # copy requirements first so that changing code doesnt trigger a full re-install
-COPY video_enhancement_server/Vchitect-2.0/requirements.txt ./requirements_vchitect.txt
+COPY Vchitect-2.0/requirements.txt ./requirements_vchitect.txt
 # use cache mounts for pip to avoid redownloading 500MB+ of libraries
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install runpod requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy \
@@ -29,7 +29,7 @@ RUN git clone https://github.com/Vchitect/Vchitect-2.0.git . && \
     wget -O /app/ckpts/vchitect_2.0_2b.pt "https://modelscope.cn/api/v1/models/vchitect/Vchitect-2.0-2B/repo?Revision=master&FilePath=vchitect_2.0_2b.pt"
 
 # 4. Setup Handler
-COPY video_enhancement_server/handler.py /app/handler.py
+COPY handler.py /app/handler.py
 
 # 5. Start Command
 CMD [ "python", "-u", "/app/handler.py" ]
