@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 2. Install Python Utilities
 # optimized python install , 
 # copy requirements first so that changing code doesnt trigger a full re-install
-COPY Vchitect-2.0/requirements.txt ./requirements_vchitect.txt
+RUN wget -O requirements_txt https://raw.githubusercontent.com/Vchitect/Vchitect-2.0/master/requirements.txt
 # use cache mounts for pip to avoid redownloading 500MB+ of libraries
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install runpod requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy \
@@ -24,8 +24,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # BAKE WEIGHTS (CRITICAL STEP)
 # We download the model now so we don't download it on every API call.
 # Model: VEnhancer_v2.pt (~5GB)
-RUN git clone https://github.com/Vchitect/Vchitect-2.0.git . && \
-    mkdir -p /app/ckpts && \
+RUN git clone https://github.com/Vchitect/Vchitect-2.0.git .
+
+
+RUN mkdir -p /app/ckpts && \
     wget -O /app/ckpts/vchitect_2.0_2b.pt "https://modelscope.cn/api/v1/models/vchitect/Vchitect-2.0-2B/repo?Revision=master&FilePath=vchitect_2.0_2b.pt"
 
 # 4. Setup Handler
