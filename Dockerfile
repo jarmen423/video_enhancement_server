@@ -15,6 +15,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # optimized python install , 
 # copy requirements first so that changing code doesnt trigger a full re-install
 RUN wget -O requirements_txt https://raw.githubusercontent.com/Vchitect/Vchitect-2.0/master/requirements.txt
+# remove 'torch' and 'torchvision' from the downloaded file so they dont conflict with the base images optimized versions.
+RUN sed -i '/torch/d' requirements_vchitect.txt && \
+    sed -i '/opencv/d' requirements_vchitect.txt
 # use cache mounts for pip to avoid redownloading 500MB+ of libraries
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install runpod requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy \
