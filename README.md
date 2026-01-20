@@ -4,154 +4,256 @@ This guide outlines how to containerize **VEnhancer** (the official Vchitect imp
 
 ## **🏗 Architecture Overview**
 
-1. **Container:** Custom Docker image based on PyTorch \+ CUDA.  
-2. **Core Logic:** Clones Vchitect/VEnhancer (Official Repo).  
-3. **Optimization:** "Bakes" the 5GB+ model weights into the image during build time to prevent slow cold starts.  
-4. **Interface:** A handler.py script that accepts a JSON payload, runs inference, and uploads the result.
+1. **Container:** Custom Docker image based on PyTorch \+ CUDA. `jfriedman028/vchitect-2.0-serverless:v1`
+2. **Storage:** Cloudflare R2 (S3-Compatible) 
+3. **Core Logic:** Clones Vchitect/VEnhancer (Official Repo).  
+4. **Optimization:** "Bakes" the 5GB+ model weights into the image during build time to prevent slow cold starts.  
+5. **Interface:** A handler.py script that accepts a JSON payload, runs inference, and uploads the result.
+6. **Flow:** Local Upload -> Public URL -> RunPod -> R2 Upload -> Public URL download.
 
-## **📂 File 1: handler.py**
+## **📂 File 1: handler.py (Server-Side)**
 
 *Save this in your project root.*
 
-This script acts as the bridge between RunPod's API and the VEnhancer CLI.
+```python
+import runpod
+import subprocess
+import os
+import requests
+import shutil
+import boto3
+from urllib.parse import urlparse
 
-import runpod  
-import subprocess  
-import os  
-import requests  
-import shutil  
-import boto3  
-from botocore.exceptions import NoCredentialsError
+# --- Configuration ---
+VCHITECT_DIR = "/app/Vchitect-2.0"
+INPUT_DIR = "/app/input"
+OUTPUT_DIR = "/app/output"
 
-\# \--- Configuration \---  
-VENHANCER\_DIR \= "/app/VEnhancer"  
-INPUT\_DIR \= "/app/input"  
-OUTPUT\_DIR \= "/app/output"
-
-\# S3 Configuration (Optional but Recommended for Video)  
-S3\_BUCKET \= os.environ.get("S3\_BUCKET", "my-bucket")  
-AWS\_ACCESS\_KEY \= os.environ.get("AWS\_ACCESS\_KEY")  
-AWS\_SECRET\_KEY \= os.environ.get("AWS\_SECRET\_KEY")
-
-def download\_file(url, destination):  
-    with requests.get(url, stream=True) as r:  
-        r.raise\_for\_status()  
-        with open(destination, 'wb') as f:  
+def download_file(url, destination):
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        with open(destination, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
 
-def upload\_to\_s3(local\_file, s3\_file):  
-    """Uploads result to S3 and returns the presigned URL or public URL"""  
-    if not AWS\_ACCESS\_KEY:  
-        return "S3 Credentials not set \- file saved locally on pod"  
-      
-    s3 \= boto3.client('s3', aws\_access\_key\_id=AWS\_ACCESS\_KEY, aws\_secret\_access\_key=AWS\_SECRET\_KEY)  
-    try:  
-        s3.upload\_file(local\_file, S3\_BUCKET, s3\_file)  
-        \# Return a signed URL valid for 1 hour  
-        url \= s3.generate\_presigned\_url('get\_object',  
-                                        Params={'Bucket': S3\_BUCKET, 'Key': s3\_file},  
-                                        ExpiresIn=3600)  
-        return url  
-    except Exception as e:  
-        return f"S3 Upload Failed: {str(e)}"
+def get_s3_client():
+    # Explicit check to prevent silent failures
+    if not os.environ.get("AWS_ACCESS_KEY"):
+        raise ValueError("Missing AWS_ACCESS_KEY env var")
+    
+    return boto3.client(
+        's3',
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_KEY"),
+        endpoint_url=os.environ.get("AWS_ENDPOINT_URL"),
+        region_name="auto"
+    )
 
-def handler(job):  
-    job\_input \= job\['input'\]  
-      
-    \# 1\. Parse Inputs  
-    video\_url \= job\_input.get('video\_url')  
-    upscale\_factor \= str(job\_input.get('upscale\_factor', '4'))  
-    version \= str(job\_input.get('version', 'v2')) \# 'v2' is best for texture  
-      
-    \# 2\. Prepare Environment  
-    if os.path.exists(INPUT\_DIR): shutil.rmtree(INPUT\_DIR)  
-    if os.path.exists(OUTPUT\_DIR): shutil.rmtree(OUTPUT\_DIR)  
-    os.makedirs(INPUT\_DIR, exist\_ok=True)  
-    os.makedirs(OUTPUT\_DIR, exist\_ok=True)  
-      
-    input\_path \= os.path.join(INPUT\_DIR, "input.mp4")
+def handler(job):
+    job_input = job['input']
+    
+    # 1. Parse Inputs
+    video_url = job_input.get('video_url')
+    if not video_url:
+        return {"error": "Missing 'video_url' in input"}
+        
+    upscale_factor = str(job_input.get('upscale_factor', '4'))
+    
+    # 2. Cleanup & Prepare Directories (Robust Method)
+    for d in [INPUT_DIR, OUTPUT_DIR]:
+        if os.path.exists(d):
+            try:
+                shutil.rmtree(d)
+            except OSError:
+                pass # Handle edge case where file is locked
+        os.makedirs(d, exist_ok=True)
+    
+    input_path = os.path.join(INPUT_DIR, "input.mp4")
 
-    \# 3\. Download Video  
-    try:  
-        print(f"Downloading video from {video\_url}...")  
-        download\_file(video\_url, input\_path)  
-    except Exception as e:  
+    # 3. Download Input
+    try:
+        print(f"Downloading from {video_url}...")
+        download_file(video_url, input_path)
+    except Exception as e:
         return {"error": f"Download failed: {str(e)}"}
 
-    \# 4\. Run Inference  
-    \# Note: \--noise\_aug 200 is critical for preventing the "oily" look  
-    command \= \[  
-        "python", "enhance\_a\_video.py",  
-        "--input\_path", INPUT\_DIR,  
-        "--save\_dir", OUTPUT\_DIR,  
-        "--version", version,   
-        "--up\_scale", upscale\_factor,  
-        "--noise\_aug", "200",   
-        "--solver\_mode", "fast",  
-        "--filename\_as\_prompt", "True"  
-    \]
+    # 4. Run Inference
+    # Note: Vchitect-2.0 uses 'inference.py'
+    command = [
+        "python", "inference.py",
+        "--input_path", INPUT_DIR,
+        "--save_dir", OUTPUT_DIR,
+        "--up_scale", upscale_factor,
+        "--noise_aug", "200" # Adds texture to prevent 'oily' look
+    ]
 
-    try:  
-        print("Starting Inference...")  
-        subprocess.check\_call(command, cwd=VENHANCER\_DIR)  
-    except subprocess.CalledProcessError:  
-        return {"error": "Inference failed. Check logs."}
+    try:
+        print("Starting Vchitect Inference...")
+        subprocess.check_call(command, cwd=VCHITECT_DIR)
+    except subprocess.CalledProcessError as e:
+        return {"error": f"Inference failed exit code: {e.returncode}"}
 
-    \# 5\. Handle Output  
-    output\_files \= \[f for f in os.listdir(OUTPUT\_DIR) if f.endswith('.mp4')\]  
-    if not output\_files:  
-        return {"error": "No output video generated."}  
-      
-    final\_video \= os.path.join(OUTPUT\_DIR, output\_files\[0\])  
-    s3\_key \= f"enhanced\_{job\['id'\]}.mp4"  
-      
-    \# Upload to S3  
-    result\_url \= upload\_to\_s3(final\_video, s3\_key)  
-      
-    return {"status": "success", "output\_url": result\_url}
+    # 5. Upload Output
+    output_files = [f for f in os.listdir(OUTPUT_DIR) if f.endswith('.mp4')]
+    if not output_files:
+        return {"error": "No output video found after inference."}
+    
+    final_video = os.path.join(OUTPUT_DIR, output_files[0])
+    s3_key = f"vchitect_output_{job['id']}.mp4"
+    
+    try:
+        s3 = get_s3_client()
+        bucket = os.environ.get("S3_BUCKET")
+        if not bucket: raise ValueError("S3_BUCKET env var missing")
+
+        print(f"Uploading to {bucket}/{s3_key}...")
+        s3.upload_file(final_video, bucket, s3_key)
+        
+        # Construct Public Download URL
+        public_base = os.environ.get("PUBLIC_BASE_URL", "").rstrip('/')
+        if not public_base:
+            return {"error": "PUBLIC_BASE_URL env var missing"}
+            
+        output_url = f"{public_base}/{s3_key}"
+        return {"status": "success", "output_url": output_url}
+        
+    except Exception as e:
+        return {"error": f"Upload failed: {str(e)}"}
 
 runpod.serverless.start({"handler": handler})
+```
+## **File 2: `run.py` (Client-Side):**
+*Run on local computer. Now handles filenames with spaces correctly*
+```python
+import os
+import requests
+import runpod
+import boto3
+import tkinter as tk
+from tkinter import filedialog
+from dotenv import load_dotenv
+from urllib.parse import quote
 
-## **🐳 File 2: Dockerfile**
+# 1. Load Config
+load_dotenv()
+REQUIRED_VARS = ["RUNPOD_API_KEY", "RUNPOD_ENDPOINT_ID", "AWS_ACCESS_KEY", "AWS_SECRET_KEY", "S3_BUCKET", "AWS_ENDPOINT_URL", "PUBLIC_BASE_URL"]
+for var in REQUIRED_VARS:
+    if not os.getenv(var):
+        print(f"❌ Error: Missing {var} in .env file")
+        exit(1)
+
+runpod.api_key = os.getenv("RUNPOD_API_KEY")
+endpoint = runpod.Endpoint(os.getenv("RUNPOD_ENDPOINT_ID"))
+
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_KEY"),
+    endpoint_url=os.getenv("AWS_ENDPOINT_URL"),
+    region_name="auto"
+)
+
+def main():
+    # 1. Pick File
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True)
+    local_path = filedialog.askopenfilename(title="Select Video")
+    root.destroy()
+
+    if not local_path:
+        print("No file selected.")
+        return
+
+    # 2. Upload to R2
+    file_name = os.path.basename(local_path)
+    # Sanitize filename for URL safety (spaces -> %20)
+    safe_file_name = quote(file_name) 
+    
+    print(f"⬆️ Uploading {file_name} to R2...")
+    try:
+        s3_client.upload_file(local_path, os.getenv("S3_BUCKET"), safe_file_name)
+    except Exception as e:
+        print(f"Upload failed: {e}")
+        return
+
+    # 3. Create Public URL
+    video_url = f"{os.getenv('PUBLIC_BASE_URL')}/{safe_file_name}"
+
+    # 4. Trigger RunPod
+    print(f"🚀 Triggering Upscale for: {video_url}")
+    try:
+        run_request = endpoint.run({
+            "input": {
+                "video_url": video_url,
+                "upscale_factor": 4
+            }
+        })
+    except Exception as e:
+        print(f"Failed to connect to RunPod: {e}")
+        return
+
+    # 5. Wait & Download
+    print(f"⏳ Waiting for Job {run_request.job_id}...")
+    result = run_request.output() # Blocking call
+
+    if "output_url" in result:
+        print("⬇️ Downloading result...")
+        r = requests.get(result['output_url'])
+        output_name = f"enhanced_{file_name}"
+        with open(output_name, "wb") as f:
+            f.write(r.content)
+        print(f"✅ Success! Saved as {output_name}")
+    else:
+        print(f"❌ Job Failed: {result}")
+
+if __name__ == "__main__":
+    main()
+```
+## **🐳 File 3: Dockerfile**
 
 *Save this in the same directory.*
 
-This builds the environment and pre-loads the heavy weights.
-
-\# Use an official PyTorch image with CUDA support  
+```Dockerfile
+# Use an official PyTorch image with CUDA support
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
-ENV DEBIAN\_FRONTEND=noninteractive  
+ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
-\# 1\. Install System Dependencies  
-RUN apt-get update && apt-get install \-y \\  
-    git wget ffmpeg libgl1-mesa-glx \\  
-    && rm \-rf /var/lib/apt/lists/\*
+# 1. Install System Dependencies
+RUN apt-get update && apt-get install -y \
+    git wget ffmpeg libgl1-mesa-glx \
+    && rm -rf /var/lib/apt/lists/*
 
-\# 2\. Install Python Utilities  
-RUN pip install runpod requests boto3
+# 2. Install Python Utilities
+RUN pip install runpod requests boto3 python-dotenv
 
-\# 3\. Clone Official VEnhancer Repo  
-RUN git clone \[https://github.com/Vchitect/VEnhancer.git\](https://github.com/Vchitect/VEnhancer.git)
-
-\# 4\. Install VEnhancer Dependencies  
-WORKDIR /app/VEnhancer  
-\# Installing specific dependencies often required for video tasks  
+# pre-install HEAVY video specific dependencies (optimization) often required for video tasks
+# done here so they are cached and dont re-download if repo changes. (done before git clone)
 RUN pip install imageio imageio-ffmpeg einops fvcore tensorboard scipy
 
-\# 5\. BAKE WEIGHTS (CRITICAL STEP)  
-\# We download the model now so we don't download it on every API call.  
-\# Model: VEnhancer\_v2.pt (\~5GB)  
-RUN mkdir \-p ckpts  
-RUN wget \-O ckpts/venhancer\_v2.pt "\[https://huggingface.co/Vchitect/VEnhancer/resolve/main/venhancer\_v2.pt\](https://huggingface.co/Vchitect/VEnhancer/resolve/main/venhancer\_v2.pt)"
+# 3. Clone Official VEnhancer Repo
+RUN git clone https://github.com/Vchitect/Vchitect-2.0.git
 
-\# 6\. Setup Handler  
-WORKDIR /app  
+# 4. Install VEnhancer Dependencies
+WORKDIR /app/Vchitect-2.0
+RUN pip install -r requirements.txt
+
+
+# 5. BAKE WEIGHTS (CRITICAL STEP)
+# We download the model now so we don't download it on every API call.
+# Model: VEnhancer_v2.pt (~5GB)
+RUN mkdir -p /app/Vchitect-2.0/ckpts
+RUN wget -O /app/Vchitect-2.0/ckpts/vchitect_2.0_2b.pt "https://modelscope.cn/api/v1/models/vchitect/Vchitect-2.0-2B/repo?Revision=master&FilePath=vchitect_2.0_2b.pt"
+
+# 6. Setup Handler
+WORKDIR /app
 ADD handler.py /app/handler.py
 
-\# 7\. Start Command  
-CMD \[ "python", "-u", "/app/handler.py" \]
+# 7. Start Command
+CMD [ "python", "-u", "/app/handler.py" ]
+
+```
 
 ## **🚀 Deployment Instructions**
 
@@ -179,25 +281,7 @@ docker push yourusername/venhancer-serverless:v1
    * AWS\_SECRET\_KEY: your\_secret  
    * S3\_BUCKET: your\_bucket\_name
 
-### **Step 3: Usage (Client Side)**
-
-Run this Python code in your pipeline to trigger the job:
-
-import runpod
-
-runpod.api\_key \= "YOUR\_RUNPOD\_API\_KEY"  
-endpoint \= runpod.Endpoint("YOUR\_ENDPOINT\_ID")
-
-run\_request \= endpoint.run({  
-    "input": {  
-        "video\_url": "\[https://example.com/my\_lowres\_video.mp4\](https://example.com/my\_lowres\_video.mp4)",  
-        "upscale\_factor": 4,  
-        "version": "v2"  
-    }  
-})
-
-print("Job started...")  
-print(run\_request.output()) \# Will wait and print the S3 URL when done
+### **Step 3: run.py**
 
 ## **💡 Pro-Tips for Quality**
 
