@@ -14,25 +14,23 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 2. Install Python Utilities
 # optimized python install , 
 # copy requirements first so that changing code doesnt trigger a full re-install
-RUN wget -O requirements_txt https://raw.githubusercontent.com/Vchitect/Vchitect-2.0/master/requirements.txt
+RUN wget -O requirements_cache.txt https://raw.githubusercontent.com/Vchitect/VEnhancer/main/requirements.txt
 # remove 'torch' and 'torchvision' from the downloaded file so they dont conflict with the base images optimized versions.
-RUN sed -i '/torch/d' requirements_vchitect.txt && \
-    sed -i '/opencv/d' requirements_vchitect.txt
+RUN sed -i '/torch/d' requirements_cache.txt && \
+    sed -i '/opencv/d' requirements_cache.txt
 # use cache mounts for pip to avoid redownloading 500MB+ of libraries
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install runpod requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy \
-    && pip install -r requirements_vchitect.txt
+    && pip install -r requirements_cache.txt
 
 # 3. Clone Official VEnhancer Repo
 # BAKE WEIGHTS (CRITICAL STEP)
 # We download the model now so we don't download it on every API call.
 # Model: VEnhancer_v2.pt (~5GB)
-RUN git clone https://github.com/Vchitect/Vchitect-2.0.git .
+RUN git clone https://github.com/Vchitect/VEnhancer.git /app/Vchitect-2.0
 
-
-RUN mkdir -p /app/ckpts && \
-    wget -O /app/ckpts/vchitect_2.0_2b.pt "https://modelscope.cn/api/v1/models/vchitect/Vchitect-2.0-2B/repo?Revision=master&FilePath=vchitect_2.0_2b.pt"
-
+RUN mkdir -p /app/VEnhancer/ckpts && \
+    wget -O /app/VEnhancer/ckpts/venhancer_v2.pt "https://huggingface.co/jwhejwhe/VEnhancer/resolve/main/venhancer_v2.pt?download=true"
 # 4. Setup Handler
 COPY handler.py /app/handler.py
 

@@ -7,7 +7,7 @@ import boto3
 
 # --- Configuration ---
 # Note: Vchitect-2.0 uses 'inference.py' as the entry point
-VCHITECT_DIR = "/app/Vchitect-2.0"
+VCHITECT_DIR = "/app/VEnhancer"
 INPUT_DIR = "/app/input"
 OUTPUT_DIR = "/app/output"
 
