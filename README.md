@@ -296,3 +296,19 @@ docker push yourusername/venhancer-serverless:v1
 3. **Cold Starts:**  
    * Because the Docker image is large (\~10GB including weights), the very first run might take 2-4 minutes to boot. Enable **FlashBoot** on RunPod if available to cache the image.
    
+```bash
+docker build -t jfriedman028/vchitect-2.0-serverless:v1 .
+docker push jfriedman028/vchitect-2.0-serverless:v1
+
+Once you push, you can click "Update" on your RunPod endpoint, and it will pull that tiny new layer in seconds.
+```
+if need to change name of docker image
+```bash
+docker tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]
+# example
+docker tag jfriedman028/vchitect-2.0-serverless:v2 jfriedman028/venhancer-v2-serverless:v1
+```
+If need to remove docker image after build and push:
+```bash
+docker rmi jfriedman028/venhancer-v2-serverless:v1
+```
