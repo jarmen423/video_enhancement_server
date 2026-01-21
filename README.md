@@ -4,7 +4,7 @@ This guide outlines how to containerize **VEnhancer** (the official Vchitect imp
 
 ## **🏗 Architecture Overview**
 
-1. **Container:** Custom Docker image based on PyTorch \+ CUDA. `jfriedman028/vchitect-2.0-serverless:v1`
+1. **Container:** Custom Docker image based on PyTorch \+ CUDA. `jfriedman028/venhancer-serverless:v2`
 2. **Storage:** Cloudflare R2 (S3-Compatible) 
 3. **Core Logic:** Clones Vchitect/VEnhancer (Official Repo).  
 4. **Optimization:** "Bakes" the 5GB+ model weights into the image during build time to prevent slow cold starts.  
@@ -30,7 +30,17 @@ INPUT_DIR = "/app/input"
 OUTPUT_DIR = "/app/output"
 
 def download_file(url, destination):
-    with requests.get(url, stream=True) as r:
+    """
+    Downloads a file from the given URL to the destination path.
+    
+    Note: We explicitly set Accept-Encoding to avoid Brotli (br) compression,
+    which the requests library cannot decode automatically. Cloudflare R2
+    may return Brotli-compressed responses by default.
+    """
+    headers = {
+        "Accept-Encoding": "gzip, deflate"  # Exclude 'br' (Brotli)
+    }
+    with requests.get(url, stream=True, headers=headers) as r:
         r.raise_for_status()
         with open(destination, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
@@ -265,15 +275,15 @@ Open your terminal in the project folder:
 docker login
 
 \# 2\. Build the image (This will take time due to the 5GB model download)  
-docker build \-t yourusername/venhancer-serverless:v1 .
+docker build \-t jfriedman028/venhancer-serverless:v2 .
 
 \# 3\. Push to Docker Hub  
-docker push yourusername/venhancer-serverless:v1
+docker push jfriedman028/venhancer-serverless:v2
 
 ### **Step 2: Configure RunPod**
 
 1. Go to **RunPod Console** \> **Serverless** \> **New Endpoint**.  
-2. **Container Image:** yourusername/venhancer-serverless:v1  
+2. **Container Image:** jfriedman028/venhancer-serverless:v2  
 3. **Container Disk:** 20 GB (The image itself is large).  
 4. **GPU Type:** RTX 3090 or RTX 4090 (Recommended).  
 5. **Environment Variables** (If using S3):  
@@ -297,8 +307,8 @@ docker push yourusername/venhancer-serverless:v1
    * Because the Docker image is large (\~10GB including weights), the very first run might take 2-4 minutes to boot. Enable **FlashBoot** on RunPod if available to cache the image.
    
 ```bash
-docker build -t jfriedman028/vchitect-2.0-serverless:v1 .
-docker push jfriedman028/vchitect-2.0-serverless:v1
+docker build -t jfriedman028/venhancer-serverless:v2 .
+docker push jfriedman028/venhancer-serverless:v2
 
 Once you push, you can click "Update" on your RunPod endpoint, and it will pull that tiny new layer in seconds.
 ```
