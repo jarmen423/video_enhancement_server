@@ -20,7 +20,7 @@ RUN sed -i '/torch/d' requirements_cache.txt && \
     sed -i '/opencv/d' requirements_cache.txt
 # use cache mounts for pip to avoid redownloading 500MB+ of libraries
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install runpod requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy \
+    pip install runpod requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy brotli \
     && pip install -r requirements_cache.txt
 
 # 3. Clone Official VEnhancer Repo
