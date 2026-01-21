@@ -12,7 +12,17 @@ INPUT_DIR = "/app/input"
 OUTPUT_DIR = "/app/output"
 
 def download_file(url, destination):
-    with requests.get(url, stream=True) as r:
+    """
+    Downloads a file from the given URL to the destination path.
+    
+    Note: We explicitly set Accept-Encoding to avoid Brotli (br) compression,
+    which the requests library cannot decode automatically. Cloudflare R2
+    may return Brotli-compressed responses by default.
+    """
+    headers = {
+        "Accept-Encoding": "gzip, deflate"  # Exclude 'br' (Brotli)
+    }
+    with requests.get(url, stream=True, headers=headers) as r:
         r.raise_for_status()
         with open(destination, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
