@@ -47,7 +47,10 @@ def main():
         print("Opening file dialog...")
         root = tk.Tk()
         root.withdraw()
-        local_path = filedialog.askopenfilename()
+        # Force the dialog to appear on top of other windows
+        root.attributes('-topmost', True)
+        root.update()  # Process the topmost attribute
+        local_path = filedialog.askopenfilename(parent=root)
         if not local_path:
             print("No file selected")
             return

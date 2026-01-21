@@ -15,17 +15,36 @@ def download_file(url, destination):
     """
     Downloads a file from the given URL to the destination path.
     
-    Note: We explicitly set Accept-Encoding to avoid Brotli (br) compression,
-    which the requests library cannot decode automatically. Cloudflare R2
-    may return Brotli-compressed responses by default.
+    Purpose & Reasoning:
+        We must be very explicit about avoiding Brotli (br) compression because:
+        1. Cloudflare R2 may return Brotli-compressed responses by default.
+        2. The 'requests' library does NOT natively decode Brotli unless 'brotli' 
+           package is installed. Using `r.raw` with streaming bypasses automatic 
+           decompression entirely, which can corrupt files if the server sends 
+           compressed data.
+        
+    Solution:
+        - Explicitly set Accept-Encoding to only allow identity (no compression).
+        - Use `r.content` (not `r.raw`) so requests can handle any decompression.
+        - Disable streaming to ensure full response handling.
+    
+    Args:
+        url: The public URL of the file to download (e.g., R2 public link).
+        destination: Local filesystem path to save the downloaded file.
+        
+    Raises:
+        requests.HTTPError: If the HTTP request returns an error status code.
     """
     headers = {
-        "Accept-Encoding": "gzip, deflate"  # Exclude 'br' (Brotli)
+        # 'identity' means no transformation - send raw bytes
+        # This is the most explicit way to tell the server "do not compress"
+        "Accept-Encoding": "identity"
     }
-    with requests.get(url, stream=True, headers=headers) as r:
-        r.raise_for_status()
-        with open(destination, 'wb') as f:
-            shutil.copyfileobj(r.raw, f)
+    response = requests.get(url, headers=headers, timeout=300)
+    response.raise_for_status()
+    
+    with open(destination, 'wb') as f:
+        f.write(response.content)
 
 def get_s3_client():
     return boto3.client(
