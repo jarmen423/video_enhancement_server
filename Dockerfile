@@ -1,45 +1,62 @@
-# Use the official RunPod PyTorch image which has proper aiohttp/Brotli support
-# This base image is maintained by RunPod and handles the SDK compatibility issues
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+# VEnhancer Serverless Dockerfile
+# 
+# CRITICAL: VEnhancer requires xformers==0.0.21 which needs PyTorch 2.0.1 + CUDA 11.8
+# Using NVIDIA's official PyTorch container for proven compatibility
+#
+FROM nvcr.io/nvidia/pytorch:23.06-py3
+
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
-# 1. Install System Dependencies
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y \
-    git wget ffmpeg libgl1-mesa-glx \
+# 1. System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git wget ffmpeg libgl1-mesa-glx libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Install Python Utilities
-# Optimized python install - copy requirements first so that changing code doesnt trigger a full re-install
-RUN wget -O requirements_cache.txt https://raw.githubusercontent.com/Vchitect/VEnhancer/main/requirements.txt
-# Remove all libraries that are likely pre-installed or cause build issues on Python 3.12
-# We remove: torch, torchvision, torchaudio, opencv*, xformers, numpy, scipy, pillow
-# Note: Use specific patterns to NOT remove torchsde (which is required)
-RUN sed -i -E '/^(torch|torchvision|torchaudio)==|opencv|xformers|^numpy==|scipy|pillow/d' requirements_cache.txt
-
-# Use cache mounts for pip to avoid redownloading 500MB+ of libraries
-# We removed --no-build-isolation because it was causing numpy build failures on 3.12
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade runpod aiohttp Brotli \
-    && pip install requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard opencv-python-headless \
-    && pip install -r requirements_cache.txt \
-    && pip install xformers --no-deps
-
-# 3. Clone Official VEnhancer Repo
-# BAKE WEIGHTS (CRITICAL STEP)
-# We download the model now so we don't download it on every API call.
-# Model: VEnhancer_v2.pt (~5GB)
+# 2. Clone VEnhancer repo first (for requirements reference)
 RUN git clone https://github.com/Vchitect/VEnhancer.git /app/VEnhancer
 
+# 3. Install Python dependencies with EXACT pinned versions
+# These versions are proven compatible with xformers 0.0.21 + PyTorch 2.0.1
+RUN pip install --no-cache-dir \
+    # RunPod SDK and dependencies
+    runpod==1.7.0 \
+    aiohttp==3.9.5 \
+    brotli==1.1.0 \
+    requests==2.31.0 \
+    boto3==1.34.0 \
+    python-dotenv==1.0.0 \
+    # VEnhancer core dependencies - PINNED versions
+    opencv-python-headless==4.10.0.84 \
+    easydict==1.13 \
+    einops==0.8.0 \
+    open-clip-torch==2.20.0 \
+    fairscale==0.4.13 \
+    torchsde==0.2.6 \
+    pytorch-lightning==2.0.1 \
+    diffusers==0.30.0 \
+    huggingface_hub==0.23.3 \
+    imageio==2.34.0 \
+    imageio-ffmpeg==0.4.9 \
+    # Pin numpy to 1.24.x (required by VEnhancer, compatible with this PyTorch)
+    "numpy>=1.24,<1.25"
+
+# 4. Install xformers SEPARATELY with exact version
+# xformers 0.0.21 is compiled against PyTorch 2.0.1 + CUDA 11.8
+RUN pip install --no-cache-dir xformers==0.0.21
+
+# 5. Download model weights (~5GB) - baked into image to avoid cold start downloads
 RUN mkdir -p /app/VEnhancer/ckpts && \
-    wget -O /app/VEnhancer/ckpts/venhancer_v2.pt "https://huggingface.co/jwhejwhe/VEnhancer/resolve/main/venhancer_v2.pt?download=true"
+    wget -q --show-progress -O /app/VEnhancer/ckpts/venhancer_v2.pt \
+    "https://huggingface.co/jwhejwhe/VEnhancer/resolve/main/venhancer_v2.pt?download=true"
 
-# 4. Setup Handler and Test Script
+# 6. Copy handler
 COPY handler.py /app/handler.py
-COPY test_brotli.py /app/test_brotli.py
-COPY test_input.json /app/test_input.json
 
-# 5. Start Command
-CMD [ "python", "-u", "/app/handler.py" ]
+# 7. Create working directories
+RUN mkdir -p /app/input /app/output
+
+# 8. Verify installation works (fail fast if broken)
+RUN python -c "import torch; import xformers; import diffusers; print(f'PyTorch: {torch.__version__}, xformers: {xformers.__version__}')"
+
+CMD ["python", "-u", "/app/handler.py"]
