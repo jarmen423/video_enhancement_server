@@ -23,7 +23,7 @@ RUN sed -i -E '/(torch|opencv|xformers|numpy|scipy|pillow)/d' requirements_cache
 # We removed --no-build-isolation because it was causing numpy build failures on 3.12
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade runpod aiohttp Brotli \
-    && pip install requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard \
+    && pip install requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard opencv-python-headless \
     && pip install -r requirements_cache.txt
 
 # 3. Clone Official VEnhancer Repo
