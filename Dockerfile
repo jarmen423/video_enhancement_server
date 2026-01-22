@@ -25,7 +25,8 @@ RUN sed -i -E '/^(torch|torchvision|torchaudio)==|opencv|xformers|^numpy==|scipy
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade runpod aiohttp Brotli \
     && pip install requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard opencv-python-headless \
-    && pip install -r requirements_cache.txt
+    && pip install -r requirements_cache.txt \
+    && pip install xformers --no-deps
 
 # 3. Clone Official VEnhancer Repo
 # BAKE WEIGHTS (CRITICAL STEP)
