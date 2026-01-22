@@ -1,7 +1,6 @@
 # Use the official RunPod PyTorch image which has proper aiohttp/Brotli support
 # This base image is maintained by RunPod and handles the SDK compatibility issues
-FROM runpod/pytorch:1.0.3-cu1290-torch280-ubuntu2204
-
+FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
 
