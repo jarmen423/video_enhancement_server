@@ -15,9 +15,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 2. Install Python Utilities
 # Optimized python install - copy requirements first so that changing code doesnt trigger a full re-install
 RUN wget -O requirements_cache.txt https://raw.githubusercontent.com/Vchitect/VEnhancer/main/requirements.txt
-# Remove all libraries that are likely pre-installed or causa build issues on Python 3.12
-# We remove: torch*, opencv*, xformers, numpy, scipy, pillow
-RUN sed -i -E '/(torch|opencv|xformers|numpy|scipy|pillow)/d' requirements_cache.txt
+# Remove all libraries that are likely pre-installed or cause build issues on Python 3.12
+# We remove: torch, torchvision, torchaudio, opencv*, xformers, numpy, scipy, pillow
+# Note: Use specific patterns to NOT remove torchsde (which is required)
+RUN sed -i -E '/^(torch|torchvision|torchaudio)==|opencv|xformers|^numpy==|scipy|pillow/d' requirements_cache.txt
 
 # Use cache mounts for pip to avoid redownloading 500MB+ of libraries
 # We removed --no-build-isolation because it was causing numpy build failures on 3.12
