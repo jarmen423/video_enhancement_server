@@ -13,34 +13,12 @@ OUTPUT_DIR = "/app/output"
 
 def download_file(url, destination):
     """
-    Downloads a file from the given URL to the destination path.
+    Downloads a video file from the given URL.
     
-    Purpose & Reasoning:
-        We must be very explicit about avoiding Brotli (br) compression because:
-        1. Cloudflare R2 may return Brotli-compressed responses by default.
-        2. The 'requests' library does NOT natively decode Brotli unless 'brotli' 
-           package is installed. Using `r.raw` with streaming bypasses automatic 
-           decompression entirely, which can corrupt files if the server sends 
-           compressed data.
-        
-    Solution:
-        - Explicitly set Accept-Encoding to only allow identity (no compression).
-        - Use `r.content` (not `r.raw`) so requests can handle any decompression.
-        - Disable streaming to ensure full response handling.
-    
-    Args:
-        url: The public URL of the file to download (e.g., R2 public link).
-        destination: Local filesystem path to save the downloaded file.
-        
-    Raises:
-        requests.HTTPError: If the HTTP request returns an error status code.
+    Now that 'brotli' is added to requirements.txt, 'requests' will 
+    automatically handle decompressing responses from R2/Cloudflare.
     """
-    headers = {
-        # 'identity' means no transformation - send raw bytes
-        # This is the most explicit way to tell the server "do not compress"
-        "Accept-Encoding": "identity"
-    }
-    response = requests.get(url, headers=headers, timeout=300)
+    response = requests.get(url, timeout=300)
     response.raise_for_status()
     
     with open(destination, 'wb') as f:
@@ -75,14 +53,22 @@ def handler(job):
     except Exception as e:
         return {"error": f"Download failed: {str(e)}"}
 
-    # 4. Run Vchitect-2.0 Inference
-    # --noise_aug 200 is used to prevent the 'oily' look
+    # 4. Run VEnhancer Inference
+    # The actual script is enhance_a_video.py, not inference.py
+    # --noise_aug 200-300 helps prevent the 'oily' look
+    prompt = job_input.get('prompt', 'a high quality video')
     command = [
-        "python", "inference.py",
-        "--input_path", INPUT_DIR,
+        "python", "enhance_a_video.py",
+        "--version", "v2",
+        "--model_path", "/app/VEnhancer/ckpts/venhancer_v2.pt",
+        "--input_path", input_path,
         "--save_dir", OUTPUT_DIR,
+        "--prompt", prompt,
         "--up_scale", upscale_factor,
-        "--noise_aug", "200"
+        "--target_fps", "24",
+        "--noise_aug", "200",
+        "--solver_mode", "fast",
+        "--steps", "15"
     ]
 
     try:
@@ -110,4 +96,5 @@ def handler(job):
     except Exception as e:
         return {"error": f"Upload to R2 failed: {str(e)}"}
 
-runpod.serverless.start({"handler": handler})
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})

@@ -3,4 +3,5 @@
 test_video/
 __pycache__/
 .ruff_cache/
-./docs/
+docs/
+

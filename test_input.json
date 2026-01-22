@@ -1,0 +1,6 @@
+{
+    "input": {
+        "video_url": "https://your-bucket.r2.cloudflarestorage.com/test-video.mp4",
+        "upscale_factor": 4
+    }
+}

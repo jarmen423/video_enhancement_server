@@ -15,16 +15,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # 2. Install Python Utilities
 # Optimized python install - copy requirements first so that changing code doesnt trigger a full re-install
 RUN wget -O requirements_cache.txt https://raw.githubusercontent.com/Vchitect/VEnhancer/main/requirements.txt
-# Remove 'torch' and 'torchvision' from the downloaded file so they don't conflict with the base image's optimized versions.
-RUN sed -i '/torch/d' requirements_cache.txt && \
-    sed -i '/opencv/d' requirements_cache.txt
+# Remove all libraries that are likely pre-installed or causa build issues on Python 3.12
+# We remove: torch*, opencv*, xformers, numpy, scipy, pillow
+RUN sed -i -E '/(torch|opencv|xformers|numpy|scipy|pillow)/d' requirements_cache.txt
 
 # Use cache mounts for pip to avoid redownloading 500MB+ of libraries
-# Note: runpod/pytorch base image should already have runpod SDK with proper Brotli support
-# We reinstall/upgrade to be sure, plus add Brotli explicitly as a fallback
+# We removed --no-build-isolation because it was causing numpy build failures on 3.12
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade runpod aiohttp Brotli \
-    && pip install requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard scipy \
+    && pip install requests boto3 python-dotenv imageio imageio-ffmpeg einops fvcore tensorboard \
     && pip install -r requirements_cache.txt
 
 # 3. Clone Official VEnhancer Repo
@@ -39,6 +38,7 @@ RUN mkdir -p /app/VEnhancer/ckpts && \
 # 4. Setup Handler and Test Script
 COPY handler.py /app/handler.py
 COPY test_brotli.py /app/test_brotli.py
+COPY test_input.json /app/test_input.json
 
 # 5. Start Command
 CMD [ "python", "-u", "/app/handler.py" ]
